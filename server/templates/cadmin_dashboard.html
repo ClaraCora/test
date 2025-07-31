@@ -10,11 +10,25 @@
     <div class="container">
         <h1>IP Reporter 管理面板</h1>
 
+        <!-- Flash 消息显示区域 -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-container">
+                {% for category, message in messages %}
+                    <div class="flash flash-{{ category }}">{{ message }}</div>
+                {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
         <div class="filter-container">
             <button class="filter-btn active" onclick="filterByRegion('all', this)">全部地区</button>
             {% for region in regions %}
                 <button class="filter-btn" onclick="filterByRegion('{{ region }}', this)">{{ region }}</button>
             {% endfor %}
+            <span style="margin-left: 20px;">排序:</span>
+            <a href="{{ url_for('admin_dashboard', sort_by='time') }}" class="filter-btn {% if current_sort == 'time' %}active{% endif %}">按时间</a>
+            <a href="{{ url_for('admin_dashboard', sort_by='ip') }}" class="filter-btn {% if current_sort == 'ip' %}active{% endif %}">按IP</a>
         </div>
 
         <table id="clients-table">
@@ -41,9 +55,7 @@
                     </td>
                     <td class="client-region">
                         <strong>{{ client.display_region }}</strong>
-                        {% set report = client.report_data %}
-                        {% if not client.is_error and report and report.Info and report.Info[0] %}
-                        {% set info = report.Info[0] %}
+                        {% set report = client.report_data %}{% if not client.is_error and report and report.Info and report.Info[0] %}{% set info = report.Info[0] %}
                         <span class="sub-info">注册: [{{ info.RegisteredRegion.Code or '?' }}] {{ info.RegisteredRegion.Name or 'N/A' }}</span>
                         <span class="sub-info">洲: {{ info.Continent.Name or 'N/A' }}</span>
                         {% endif %}
@@ -51,15 +63,8 @@
                     <td>
                         {% if client.is_error %}
                             <strong style="color: red;">执行失败</strong>
-                            {% if report and report.Info and report.Info[0] %}
-                            <span class="sub-info ellipsis" title="{{ report.Info[0].Organization }}">{{ report.Info[0].Organization }}</span>
-                            {% endif %}
-                            {% if report and report.ErrorLog and report.ErrorLog.content %}
-                                <details style="margin-top: 8px; font-size: 0.8em; cursor: pointer;">
-                                    <summary>显示详细日志</summary>
-                                    <pre style="white-space: pre-wrap; background: #eee; padding: 5px; border-radius: 4px; max-height: 200px; overflow-y: auto; margin-top: 5px;">{{ report.ErrorLog.content }}</pre>
-                                </details>
-                            {% endif %}
+                            {% if report and report.Info and report.Info[0] %}<span class="sub-info ellipsis" title="{{ report.Info[0].Organization }}">{{ report.Info[0].Organization }}</span>{% endif %}
+                            {% if report and report.ErrorLog and report.ErrorLog.content %}<details style="margin-top: 8px; font-size: 0.8em; cursor: pointer;"><summary>显示详细日志</summary><pre style="white-space: pre-wrap; background: #eee; padding: 5px; border-radius: 4px; max-height: 200px; overflow-y: auto; margin-top: 5px;">{{ report.ErrorLog.content }}</pre></details>{% endif %}
                         {% elif report and report.Info and report.Info[0] %}
                             <strong>AS{{ report.Info[0].ASN or 'N/A' }}</strong>
                             <span class="sub-info ellipsis" title="{{ report.Info[0].Organization or 'N/A' }}">{{ report.Info[0].Organization or 'N/A' }}</span>
@@ -68,46 +73,21 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if not client.is_error and report and report.Score and report.Score[0] %}
-                            {% set scores = report.Score[0] %}
-                            <div class="risk-grid">
-                                <div class="risk-item">Scamalytics: <strong>{{ scores.SCAMALYTICS if scores.SCAMALYTICS is not none else 'N/A' }}</strong></div>
-                                <div class="risk-item">ipapi: <strong>{{ scores.ipapi if scores.ipapi is not none else 'N/A' }}</strong></div>
-                                <div class="risk-item">AbuseIPDB: <strong>{{ scores.AbuseIPDB if scores.AbuseIPDB is not none else 'N/A' }}</strong></div>
-                                <div class="risk-item">IPQS: <strong>{{ scores.IPQS if scores.IPQS is not none else 'N/A' }}</strong></div>
-                                <div class="risk-item">Cloudflare: <strong>{{ scores.Cloudflare if scores.Cloudflare is not none else 'N/A' }}</strong></div>
-                            </div>
-                        {% else %}
-                            N/A
-                        {% endif %}
+                        {% if not client.is_error and report and report.Score and report.Score[0] %}{% set scores = report.Score[0] %}<div class="risk-grid">
+                            <div class="risk-item">Scamalytics: <strong>{{ scores.SCAMALYTICS if scores.SCAMALYTICS is not none else 'N/A' }}</strong></div>
+                            <div class="risk-item">ipapi: <strong>{{ scores.ipapi if scores.ipapi is not none else 'N/A' }}</strong></div>
+                            <div class="risk-item">AbuseIPDB: <strong>{{ scores.AbuseIPDB if scores.AbuseIPDB is not none else 'N/A' }}</strong></div>
+                            <div class="risk-item">IPQS: <strong>{{ scores.IPQS if scores.IPQS is not none else 'N/A' }}</strong></div>
+                            <div class="risk-item">Cloudflare: <strong>{{ scores.Cloudflare if scores.Cloudflare is not none else 'N/A' }}</strong></div>
+                        </div>{% else %}N/A{% endif %}
                     </td>
                     <td>
-                        {% if not client.is_error and report and report.Media and report.Media[0] %}
-                            {% set media = report.Media[0] %}
-                            {% set services = {'TikTok': 'TikTok', 'DisneyPlus': 'Disney+', 'Netflix': 'Netflix', 'Youtube': 'Youtube', 'AmazonPrimeVideo': 'PrimeVideo', 'Spotify': 'Spotify', 'ChatGPT': 'ChatGPT'} %}
-                            <div class="media-grid">
-                            {% for service_key, display_name in services.items() %}
-                                {% if media[service_key] %}
-                                    {% set service = media[service_key] %}
-                                    <div class="media-item 
-                                        {% if service.Status == '解锁' %}status-yes
-                                        {% elif service.Status in ['仅自制', 'DNS'] %}status-org
-                                        {% else %}status-no{% endif %}">
-                                        <span>{{ display_name }}: <strong>{{ service.Region or 'N/A' }}</strong></span>
-                                        <span class="details"> ({{ service.Status or '?' }}{% if service.Type and service.Type != '' %}/{{ service.Type }}{% endif %})</span>
-                                    </div>
-                                {% endif %}
-                            {% endfor %}
-                            </div>
-                        {% else %}
-                            N/A
-                        {% endif %}
+                        {% if not client.is_error and report and report.Media and report.Media[0] %}{% set media = report.Media[0] %}{% set services = {'TikTok': 'TikTok', 'DisneyPlus': 'Disney+', 'Netflix': 'Netflix', 'Youtube': 'Youtube', 'AmazonPrimeVideo': 'PrimeVideo', 'Spotify': 'Spotify', 'ChatGPT': 'ChatGPT'} %}<div class="media-grid">{% for service_key, display_name in services.items() %}{% if media[service_key] %}{% set service = media[service_key] %}<div class="media-item {% if service.Status == '解锁' %}status-yes{% elif service.Status in ['仅自制', 'DNS'] %}status-org{% else %}status-no{% endif %}"><span>{{ display_name }}: <strong>{{ service.Region or 'N/A' }}</strong></span><span class="details"> ({{ service.Status or '?' }}{% if service.Type and service.Type != '' %}/{{ service.Type }}{% endif %})</span></div>{% endif %}{% endfor %}</div>{% else %}N/A{% endif %}
                     </td>
                     <td>
                         <span class="last-report-time">{{ client.last_report_time }}</span>
-                        <form action="{{ url_for('trigger_retest', ip=client.ip) }}" method="post">
-                            <button type="submit" class="action-btn">马上重测</button>
-                        </form>
+                        <form action="{{ url_for('trigger_retest', ip=client.ip) }}" method="post" style="margin-bottom: 5px;"><button type="submit" class="action-btn">马上重测</button></form>
+                        <form action="{{ url_for('delete_client', ip=client.ip) }}" method="post" onsubmit="return confirm('您确定要删除这台机器的记录吗？');"><button type="submit" class="action-btn btn-delete">删除记录</button></form>
                     </td>
                 </tr>
                 {% endfor %}
@@ -115,19 +95,7 @@
         </table>
     </div>
     <script>
-        function filterByRegion(region, buttonElement) {
-            const rows = document.querySelectorAll('#clients-table tbody tr');
-            rows.forEach(row => {
-                const mainRegion = row.querySelector('.client-region strong').textContent.trim();
-                if (region === 'all' || mainRegion === region) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-            buttonElement.classList.add('active');
-        }
+        function filterByRegion(region, buttonElement) { const rows = document.querySelectorAll('#clients-table tbody tr'); rows.forEach(row => { const mainRegion = row.querySelector('.client-region strong').textContent.trim(); if (region === 'all' || mainRegion === region) { row.style.display = ''; } else { row.style.display = 'none'; } }); document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); buttonElement.classList.add('active'); }
     </script>
 </body>
 </html>
