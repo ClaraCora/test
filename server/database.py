@@ -36,7 +36,7 @@ def save_report(ip, port, client_key, report_data):
         cursor.execute('''
             INSERT INTO clients (ip, port, client_key, last_report_data, last_report_time)
             VALUES (?, ?, ?, ?, ?)
-        ''', (port, client_key, report_json_str, now_str))
+        ''', (ip, port, client_key, report_json_str, now_str))
     conn.commit(); conn.close()
 
 def get_all_clients(sort_by='time'):
