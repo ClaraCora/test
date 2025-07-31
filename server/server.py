@@ -19,7 +19,9 @@ cfg = config.load_config()
 app.secret_key = cfg.get('FLASK_SECRET_KEY', os.urandom(24))
 database.init_db()
 
+# --- 核心修复点：添加这一行来禁用模板缓存，让 restart 生效 ---
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+
 
 # --- 安全功能：HTTP基础认证 ---
 def check_auth(username, password):
@@ -81,59 +83,34 @@ def process_clients_data(clients_raw):
 @app.route('/report', methods=['POST'])
 def handle_client_report():
     client_ip = request.remote_addr
-    print(f"\n--- Received report from IP: {client_ip} ---")
-
     try:
         client_key = request.headers.get('X-Client-Key')
         signature_header = request.headers.get('X-Signature')
-
         if not client_key or not signature_header:
-            print(f"[{client_ip}] REJECTED: Missing security headers.")
             return jsonify({"status": "error", "message": "Missing security headers"}), 403
-
         sig_parts = {p.split('=')[0]: p.split('=')[1] for p in signature_header.split(',')}
         timestamp = int(sig_parts['t'])
         client_signature = sig_parts['s']
-
         if abs(time.time() - timestamp) > 300:
-            print(f"[{client_ip}] REJECTED: Stale request (timestamp expired).")
             return jsonify({"status": "error", "message": "Stale request"}), 408
-
         body = request.get_data()
         if not body:
-            print(f"[{client_ip}] REJECTED: Empty request body.")
             return jsonify({"status": "error", "message": "Empty request body"}), 400
-
         message = f"{timestamp}.{body.decode('utf-8')}".encode('utf-8')
         secret = client_key.encode('utf-8')
         server_signature = hmac.new(secret, message, hashlib.sha256).hexdigest()
-
         if not hmac.compare_digest(server_signature, client_signature):
-            print(f"[{client_ip}] REJECTED: Invalid signature.")
             return jsonify({"status": "error", "message": "Invalid signature"}), 403
-
-        print(f"[{client_ip}] Signature verified successfully.")
-
         report_data = json.loads(body)
         client_port = report_data.get('client_listen_port', 37028)
-
         database.save_report(client_ip, client_port, client_key, report_data)
-
-        print(f"[{client_ip}] Report saved successfully.")
         return jsonify({"status": "success"}), 200
-
-    except json.JSONDecodeError:
-        print(f"[{client_ip}] ERROR: Request body is not valid JSON, although signature was correct.")
-        return jsonify({"status": "error", "message": "Invalid JSON format in request body"}), 400
     except Exception as e:
-        print(f"[{client_ip}] CRITICAL ERROR in /report endpoint: {e}")
         return jsonify({"status": "error", "message": f"Internal Server Error: {e}"}), 500
-
 
 # --- Web 界面路由 ---
 @app.route('/')
 def guest_dashboard():
-    # 在访客页面，我们仍然可以按编号排序，但显示的是连续的“机器-XX”
     clients_raw = database.get_all_clients(sort_by='id')
     clients_processed, regions = process_clients_data(clients_raw)
     machine_counter = 1
@@ -145,7 +122,7 @@ def guest_dashboard():
 @app.route('/cadmin')
 @requires_auth
 def admin_dashboard():
-    sort_by = request.args.get('sort_by', 'id') # 默认按编号排序
+    sort_by = request.args.get('sort_by', 'id')
     clients_raw = database.get_all_clients(sort_by=sort_by)
     clients_processed, regions = process_clients_data(clients_raw)
     return render_template('cadmin_dashboard.html', clients=clients_processed, regions=regions, current_sort=sort_by)
@@ -153,14 +130,12 @@ def admin_dashboard():
 @app.route('/trigger_retest/<ip>', methods=['POST'])
 @requires_auth
 def trigger_retest(ip):
-    # 完整的AJAX请求处理
     is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     client = database.get_client_by_ip(ip)
     if not client:
         message = f"错误：未找到IP为 {ip} 的客户端。"
         if is_ajax: return jsonify({"status": "error", "message": message}), 404
         else: flash(message, "error"); return redirect(url_for('admin_dashboard'))
-
     client_url = f"http://{client['ip']}:{client['port']}/retest"
     headers = {'X-Server-Key': cfg['SERVER_SECRET_KEY']}
     status_code, response_data = 200, {}
@@ -189,22 +164,17 @@ def update_remark():
 @app.route('/update_machine_id', methods=['POST'])
 @requires_auth
 def update_machine_id():
-    """处理更新机器编号的请求"""
     ip = request.form.get('ip')
     machine_id_str = request.form.get('machine_id')
-    
     if not machine_id_str:
         database.update_machine_id(ip, None)
         flash(f"已清除 {ip} 的机器编号。", "success")
-        return redirect(request.referrer or url_for('admin_dashboard'))
-
-    if not machine_id_str.isdigit():
+    elif not machine_id_str.isdigit():
         flash('错误：机器编号必须是一个正整数。', 'error')
-        return redirect(request.referrer or url_for('admin_dashboard'))
-    
-    machine_id = int(machine_id_str)
-    database.update_machine_id(ip, machine_id)
-    flash(f"已更新 {ip} 的机器编号为 {machine_id}。", "success")
+    else:
+        machine_id = int(machine_id_str)
+        database.update_machine_id(ip, machine_id)
+        flash(f"已更新 {ip} 的机器编号为 {machine_id}。", "success")
     return redirect(request.referrer or url_for('admin_dashboard'))
 
 @app.route('/delete_client/<ip>', methods=['POST'])
