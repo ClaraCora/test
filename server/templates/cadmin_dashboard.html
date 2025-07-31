@@ -40,6 +40,15 @@
             background-color: #f8d7da;
             border-color: #f5c6cb;
         }
+        /* 调整表单间距和编号输入框宽度 */
+        .remark-form {
+            margin-top: 4px !important;
+            margin-bottom: 4px !important;
+        }
+        .remark-input.id-input {
+            width: 60px;
+            flex-grow: 0;
+        }
     </style>
 </head>
 <body>
@@ -66,6 +75,7 @@
                 <button class="filter-btn" onclick="filterByRegion('{{ region }}', this)">{{ region }}</button>
             {% endfor %}
             <span style="margin-left: 20px;">排序:</span>
+            <a href="{{ url_for('admin_dashboard', sort_by='id') }}" class="filter-btn {% if current_sort == 'id' %}active{% endif %}">按编号</a>
             <a href="{{ url_for('admin_dashboard', sort_by='time') }}" class="filter-btn {% if current_sort == 'time' %}active{% endif %}">按时间</a>
             <a href="{{ url_for('admin_dashboard', sort_by='ip') }}" class="filter-btn {% if current_sort == 'ip' %}active{% endif %}">按IP</a>
         </div>
@@ -73,7 +83,7 @@
         <table id="clients-table">
             <thead>
                 <tr>
-                    <th>机器IP / 备注</th>
+                    <th>机器IP / 备注 / 编号</th>
                     <th>地区 / 注册地</th>
                     <th>ASN / 组织</th>
                     <th>风险评分</th>
@@ -86,9 +96,16 @@
                 <tr>
                     <td>
                         <strong>{{ client.ip }}</strong>
+                        <!-- 备注表单 -->
                         <form action="{{ url_for('update_remark') }}" method="post" class="remark-form">
                             <input type="hidden" name="ip" value="{{ client.ip }}">
                             <input type="text" name="remark" value="{{ client.remark or '' }}" placeholder="添加备注" class="remark-input">
+                            <button type="submit" class="action-btn btn-save">保存</button>
+                        </form>
+                        <!-- 机器编号表单 -->
+                        <form action="{{ url_for('update_machine_id') }}" method="post" class="remark-form">
+                            <input type="hidden" name="ip" value="{{ client.ip }}">
+                            <input type="number" name="machine_id" value="{{ client.machine_id if client.machine_id is not none else '' }}" placeholder="编号" class="remark-input id-input" min="0">
                             <button type="submit" class="action-btn btn-save">保存</button>
                         </form>
                     </td>
@@ -243,7 +260,7 @@
                         button.disabled = true;
                         let remainingSeconds = Math.ceil(remaining);
                         
-                        const updateButtonText = () => {
+                        const updateButtonText = ()_ => {
                             button.textContent = `重测中... (${remainingSeconds}s)`;
                         };
                         updateButtonText();
