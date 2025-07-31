@@ -152,7 +152,7 @@ def trigger_retest(ip):
     if not client: flash(f"错误：未找到IP为 {ip} 的客户端。", "error"); return redirect(url_for('admin_dashboard'))
     client_url = f"http://{client['ip']}:{client['port']}/retest"; headers = {'X-Server-Key': cfg['SERVER_SECRET_KEY']}
     try:
-        response = requests.post(client_url, headers=headers, timeout=15)
+        response = requests.post(client_url, headers=headers, timeout=150)
         if response.status_code == 200:
             flash(f"客户端 {ip} 确认：检测任务已成功完成。", "success")
         else:
