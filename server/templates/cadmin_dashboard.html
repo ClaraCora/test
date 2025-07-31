@@ -5,12 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IP Reporter 管理面板</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        /* 为禁用的按钮添加更明显的样式 */
+        .action-btn:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        /* 动态flash消息的样式 */
+        .flash-dynamic-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1050;
+            width: 300px;
+        }
+        .flash-dynamic {
+            padding: 15px;
+            margin-bottom: 10px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            opacity: 1;
+            transition: opacity 0.5s ease-out;
+        }
+        .flash-dynamic.success {
+            color: #155724;
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .flash-dynamic.error {
+            color: #721c24;
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <h1>IP Reporter 管理面板</h1>
 
-        <!-- Flash 消息显示区域 -->
+        <!-- Flash 消息显示区域 (用于页面加载时) -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 <div class="flash-container">
@@ -20,6 +56,9 @@
                 </div>
             {% endif %}
         {% endwith %}
+        
+        <!-- 新增：用于动态显示AJAX结果的容器 -->
+        <div id="flash-container-dynamic" class="flash-dynamic-container"></div>
 
         <div class="filter-container">
             <button class="filter-btn active" onclick="filterByRegion('all', this)">全部地区</button>
@@ -64,7 +103,7 @@
                         {% if client.is_error %}
                             <strong style="color: red;">执行失败</strong>
                             {% if report and report.Info and report.Info[0] %}<span class="sub-info ellipsis" title="{{ report.Info[0].Organization }}">{{ report.Info[0].Organization }}</span>{% endif %}
-                            {% if report and report.ErrorLog and report.ErrorLog.content %}<details style="margin-top: 8px; font-size: 0.8em; cursor: pointer;"><summary>显示详细日志</summary><pre style="white-space: pre-wrap; background: #eee; padding: 5px; border-radius: 4px; max-height: 200px; overflow-y: auto; margin-top: 5px;">{{ report.ErrorLog.content }}</pre></details>{% endif %}
+                            {% if report and report.ErrorLog and report.ErrorLog.stdout %}<details style="margin-top: 8px; font-size: 0.8em; cursor: pointer;"><summary>显示详细日志</summary><pre style="white-space: pre-wrap; background: #eee; padding: 5px; border-radius: 4px; max-height: 200px; overflow-y: auto; margin-top: 5px;">{{ report.ErrorLog.stdout }}\n{{ report.ErrorLog.stderr }}</pre></details>{% endif %}
                         {% elif report and report.Info and report.Info[0] %}
                             <strong>AS{{ report.Info[0].ASN or 'N/A' }}</strong>
                             <span class="sub-info ellipsis" title="{{ report.Info[0].Organization or 'N/A' }}">{{ report.Info[0].Organization or 'N/A' }}</span>
@@ -86,7 +125,9 @@
                     </td>
                     <td>
                         <span class="last-report-time">{{ client.last_report_time }}</span>
-                        <form action="{{ url_for('trigger_retest', ip=client.ip) }}" method="post" style="margin-bottom: 5px;"><button type="submit" class="action-btn">马上重测</button></form>
+                        <form action="{{ url_for('trigger_retest', ip=client.ip) }}" method="post" onsubmit="return handleRetest(event, '{{ client.ip }}')" style="margin-bottom: 5px;">
+                            <button type="submit" class="action-btn retest-button" data-ip="{{ client.ip }}">马上重测</button>
+                        </form>
                         <form action="{{ url_for('delete_client', ip=client.ip) }}" method="post" onsubmit="return confirm('您确定要删除这台机器的记录吗？');"><button type="submit" class="action-btn btn-delete">删除记录</button></form>
                     </td>
                 </tr>
@@ -94,7 +135,139 @@
             </tbody>
         </table>
     </div>
+
     <script>
+        const COOLDOWN_SECONDS = 160;
+
+        /**
+         * 显示动态的flash消息
+         */
+        function showDynamicFlash(message, category) {
+            const container = document.getElementById('flash-container-dynamic');
+            const flashDiv = document.createElement('div');
+            flashDiv.className = `flash-dynamic ${category}`;
+            flashDiv.textContent = message;
+            container.prepend(flashDiv); // Prepend to show new messages on top
+            
+            setTimeout(() => {
+                flashDiv.style.opacity = '0';
+                setTimeout(() => flashDiv.remove(), 500); // Remove after fade out
+            }, 5000);
+        }
+
+        /**
+         * 处理重测按钮的点击事件 (AJAX版本)
+         */
+        function handleRetest(event, ip) {
+            event.preventDefault(); // 阻止表单的默认提交行为（即阻止页面刷新）
+
+            const button = document.querySelector(`.retest-button[data-ip="${ip}"]`);
+            
+            // 立即启动冷却，提供即时反馈
+            startCooldown(ip, button);
+
+            // 使用fetch API在后台发送请求
+            fetch(event.target.action, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest' // 标记为AJAX请求
+                }
+            })
+            .then(response => {
+                // 检查响应是否成功，如果不成功，则解析错误信息
+                if (!response.ok) {
+                    return response.json().then(err => Promise.reject(err));
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 请求成功
+                showDynamicFlash(data.message || `客户端 ${ip} 的任务已成功完成。`, 'success');
+                // 2秒后自动刷新页面，以显示最新数据
+                setTimeout(() => { window.location.reload(); }, 2000);
+            })
+            .catch(error => {
+                // 请求失败
+                showDynamicFlash(error.message || `连接或处理客户端 ${ip} 时发生错误。`, 'error');
+                // 即使失败了，倒计时也会继续，防止用户立即重试失败的请求
+            });
+
+            return false; // 再次确保表单不会提交
+        }
+
+        /**
+         * 启动按钮的冷却和倒计时显示
+         */
+        function startCooldown(ip, button) {
+            const storageKey = 'retest_cooldown_' + ip;
+            localStorage.setItem(storageKey, Date.now());
+            button.disabled = true;
+
+            let remainingSeconds = COOLDOWN_SECONDS;
+            
+            const updateButtonText = () => {
+                button.textContent = `重测中... (${remainingSeconds}s)`;
+            };
+            
+            updateButtonText(); // Immediately update text
+
+            const intervalId = setInterval(() => {
+                remainingSeconds--;
+                if (remainingSeconds > 0) {
+                    updateButtonText();
+                } else {
+                    clearInterval(intervalId);
+                    button.disabled = false;
+                    button.textContent = '马上重测';
+                    localStorage.removeItem(storageKey);
+                }
+            }, 1000);
+        }
+
+        /**
+         * 页面加载时，检查并恢复所有按钮的冷却状态
+         */
+        document.addEventListener('DOMContentLoaded', function() {
+            const retestButtons = document.querySelectorAll('.retest-button');
+            retestButtons.forEach(button => {
+                const ip = button.dataset.ip;
+                const storageKey = 'retest_cooldown_' + ip;
+                const startTime = localStorage.getItem(storageKey);
+
+                if (startTime) {
+                    const elapsedSeconds = (Date.now() - parseInt(startTime)) / 1000;
+                    const remaining = COOLDOWN_SECONDS - elapsedSeconds;
+
+                    if (remaining > 0) {
+                        // 恢复倒计时
+                        button.disabled = true;
+                        let remainingSeconds = Math.ceil(remaining);
+                        
+                        const updateButtonText = () => {
+                            button.textContent = `重测中... (${remainingSeconds}s)`;
+                        };
+                        updateButtonText();
+
+                        const intervalId = setInterval(() => {
+                            remainingSeconds--;
+                            if (remainingSeconds > 0) {
+                                updateButtonText();
+                            } else {
+                                clearInterval(intervalId);
+                                button.disabled = false;
+                                button.textContent = '马上重测';
+                                localStorage.removeItem(storageKey);
+                            }
+                        }, 1000);
+                    } else {
+                        // 清理过期的localStorage项
+                        localStorage.removeItem(storageKey);
+                    }
+                }
+            });
+        });
+        
+        // 过滤功能的JS保持不变
         function filterByRegion(region, buttonElement) { const rows = document.querySelectorAll('#clients-table tbody tr'); rows.forEach(row => { const mainRegion = row.querySelector('.client-region strong').textContent.trim(); if (region === 'all' || mainRegion === region) { row.style.display = ''; } else { row.style.display = 'none'; } }); document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); buttonElement.classList.add('active'); }
     </script>
 </body>
