@@ -1,6 +1,7 @@
-# 文件名: server.py (最终、完整、包含所有功能的版本)
+# 文件名: server.py (最终、完整、适配异步客户端)
 import os
 import json
+import re
 import requests
 import hmac
 import hashlib
@@ -19,17 +20,21 @@ cfg = config.load_config()
 app.secret_key = cfg.get('FLASK_SECRET_KEY', os.urandom(24))
 database.init_db()
 
-# --- 核心修复点：添加这一行来禁用模板缓存，让 restart 生效 ---
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+
+
+def clean_ansi_codes(text):
+    """使用正则表达式移除字符串中的ANSI转义码"""
+    if not isinstance(text, str): return text
+    ansi_escape_pattern = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape_pattern.sub('', text)
 
 
 # --- 安全功能：HTTP基础认证 ---
 def check_auth(username, password):
-    """检查用户名和密码是否正确"""
     return username == cfg.get('ADMIN_USER', 'admin') and password == cfg.get('ADMIN_PASS', 'password')
 
 def authenticate():
-    """发送401响应，要求浏览器进行认证"""
     return Response('Could not verify your access level for that URL.\n'
                     'You have to login with proper credentials', 401,
                     {'WWW-Authenticate': 'Basic realm="Login Required"'})
@@ -45,7 +50,6 @@ def requires_auth(f):
 
 # --- 辅助函数 ---
 def get_majority_country(report_data):
-    """健壮地分析Factor数据，通过投票找出最可能的国家"""
     try:
         country_codes = report_data.get('Factor', [{}])[0].get('CountryCode', {})
         if not country_codes: raise ValueError("CountryCode data is empty")
@@ -59,12 +63,17 @@ def get_majority_country(report_data):
         except: return 'N/A'
 
 def process_clients_data(clients_raw):
-    """健壮地处理从数据库获取的原始数据，能识别正常和错误报告"""
     clients_processed = []; regions_set = set()
     for client in clients_raw:
         client_dict = dict(client)
         try:
             report_data = json.loads(client_dict['last_report_data'])
+            if 'Media' in report_data and report_data['Media']:
+                media_info = report_data['Media'][0]
+                for service_details in media_info.values():
+                    if isinstance(service_details, dict) and 'Region' in service_details:
+                        cleaned_region = clean_ansi_codes(service_details['Region'])
+                        service_details['Region'] = cleaned_region.upper()
             client_dict['report_data'] = report_data
             info_block = report_data.get('Info', [{}])[0]
             if info_block.get('ASN') == 'ERROR':
@@ -79,38 +88,35 @@ def process_clients_data(clients_raw):
         clients_processed.append(client_dict)
     return clients_processed, sorted(list(regions_set))
 
-# --- API 路由 (完整的HMAC验证) ---
+# --- API 路由 ---
 @app.route('/report', methods=['POST'])
 def handle_client_report():
+    # ... (此函数无需修改) ...
     client_ip = request.remote_addr
     try:
         client_key = request.headers.get('X-Client-Key')
         signature_header = request.headers.get('X-Signature')
-        if not client_key or not signature_header:
-            return jsonify({"status": "error", "message": "Missing security headers"}), 403
+        if not client_key or not signature_header: return jsonify({"status": "error", "message": "Missing security headers"}), 403
         sig_parts = {p.split('=')[0]: p.split('=')[1] for p in signature_header.split(',')}
         timestamp = int(sig_parts['t'])
         client_signature = sig_parts['s']
-        if abs(time.time() - timestamp) > 300:
-            return jsonify({"status": "error", "message": "Stale request"}), 408
+        if abs(time.time() - timestamp) > 300: return jsonify({"status": "error", "message": "Stale request"}), 408
         body = request.get_data()
-        if not body:
-            return jsonify({"status": "error", "message": "Empty request body"}), 400
+        if not body: return jsonify({"status": "error", "message": "Empty request body"}), 400
         message = f"{timestamp}.{body.decode('utf-8')}".encode('utf-8')
         secret = client_key.encode('utf-8')
         server_signature = hmac.new(secret, message, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(server_signature, client_signature):
-            return jsonify({"status": "error", "message": "Invalid signature"}), 403
+        if not hmac.compare_digest(server_signature, client_signature): return jsonify({"status": "error", "message": "Invalid signature"}), 403
         report_data = json.loads(body)
         client_port = report_data.get('client_listen_port', 37028)
         database.save_report(client_ip, client_port, client_key, report_data)
         return jsonify({"status": "success"}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"Internal Server Error: {e}"}), 500
+    except Exception as e: return jsonify({"status": "error", "message": f"Internal Server Error: {e}"}), 500
 
 # --- Web 界面路由 ---
 @app.route('/')
 def guest_dashboard():
+    # ... (此函数无需修改) ...
     clients_raw = database.get_all_clients(sort_by='id')
     clients_processed, regions = process_clients_data(clients_raw)
     machine_counter = 1
@@ -122,6 +128,7 @@ def guest_dashboard():
 @app.route('/cadmin')
 @requires_auth
 def admin_dashboard():
+    # ... (此函数无需修改) ...
     sort_by = request.args.get('sort_by', 'id')
     clients_raw = database.get_all_clients(sort_by=sort_by)
     clients_processed, regions = process_clients_data(clients_raw)
@@ -136,27 +143,42 @@ def trigger_retest(ip):
         message = f"错误：未找到IP为 {ip} 的客户端。"
         if is_ajax: return jsonify({"status": "error", "message": message}), 404
         else: flash(message, "error"); return redirect(url_for('admin_dashboard'))
+    
     client_url = f"http://{client['ip']}:{client['port']}/retest"
     headers = {'X-Server-Key': cfg['SERVER_SECRET_KEY']}
     status_code, response_data = 200, {}
+
     try:
-        response = requests.post(client_url, headers=headers, timeout=160)
-        try: client_response_json = response.json()
-        except json.JSONDecodeError: client_response_json = {}
-        if response.status_code == 200:
-            response_data = {"status": "success", "message": client_response_json.get('message', f"客户端 {ip} 的任务已成功完成。")}
+        # --- 核心修改点：超时可以设置得短一些，因为我们不期待它完成任务，只期待它接受任务 ---
+        response = requests.post(client_url, headers=headers, timeout=20)
+        
+        # --- 核心修改点：检查200 OK 或 202 Accepted ---
+        if response.status_code == 200 or response.status_code == 202:
+            response_data = {
+                "status": "success", 
+                "message": f"已向客户端 {ip} 发送重测指令。请稍后刷新查看结果。"
+            }
         else:
             status_code = response.status_code if response.status_code >= 400 else 500
-            response_data = {"status": "error", "message": f"客户端 {ip} 报告错误: {client_response_json.get('message', response.text)}"}
+            client_response_json = {}
+            try: client_response_json = response.json()
+            except json.JSONDecodeError: pass
+            response_data = {
+                "status": "error", 
+                "message": f"客户端 {ip} 拒绝指令: {client_response_json.get('message', response.text or '无详细信息')}"
+            }
+
     except requests.exceptions.RequestException as e:
         status_code = 500
         response_data = {"status": "error", "message": f"连接客户端 {ip} 失败: {e}"}
+
     if is_ajax: return jsonify(response_data), status_code
     else: flash(response_data['message'], response_data['status']); return redirect(url_for('admin_dashboard'))
 
 @app.route('/update_remark', methods=['POST'])
 @requires_auth
 def update_remark():
+    # ... (此函数无需修改) ...
     ip = request.form.get('ip'); remark = request.form.get('remark')
     if ip: database.update_remark(ip, remark); flash(f"已更新 {ip} 的备注。", "success")
     return redirect(request.referrer or url_for('admin_dashboard'))
@@ -164,6 +186,7 @@ def update_remark():
 @app.route('/update_machine_id', methods=['POST'])
 @requires_auth
 def update_machine_id():
+    # ... (此函数无需修改) ...
     ip = request.form.get('ip')
     machine_id_str = request.form.get('machine_id')
     if not machine_id_str:
@@ -180,6 +203,7 @@ def update_machine_id():
 @app.route('/delete_client/<ip>', methods=['POST'])
 @requires_auth
 def delete_client(ip):
+    # ... (此函数无需修改) ...
     database.delete_client_by_ip(ip)
     flash(f"已删除机器 {ip} 的记录。", "success")
     return redirect(url_for('admin_dashboard'))
