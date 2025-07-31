@@ -19,6 +19,8 @@ cfg = config.load_config()
 app.secret_key = cfg.get('FLASK_SECRET_KEY', os.urandom(24))
 database.init_db()
 
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+
 # --- 安全功能：HTTP基础认证 ---
 def check_auth(username, password):
     """检查用户名和密码是否正确"""
