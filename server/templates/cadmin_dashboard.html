@@ -6,50 +6,13 @@
     <title>IP Reporter 管理面板</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
-        /* 为禁用的按钮添加更明显的样式 */
-        .action-btn:disabled {
-            background-color: #95a5a6;
-            cursor: not-allowed;
-            opacity: 0.7;
-        }
-        /* 动态flash消息的样式 */
-        .flash-dynamic-container {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 1050;
-            width: 320px;
-        }
-        .flash-dynamic {
-            padding: 1rem;
-            margin-bottom: 1rem;
-            border: 1px solid transparent;
-            border-radius: 0.25rem;
-            font-weight: bold;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            opacity: 1;
-            transition: opacity 0.5s ease-out;
-        }
-        .flash-dynamic.success {
-            color: #0f5132;
-            background-color: #d1e7dd;
-            border-color: #badbcc;
-        }
-        .flash-dynamic.error {
-            color: #842029;
-            background-color: #f8d7da;
-            border-color: #f5c2c7;
-        }
-        /* 调整表单间距和编号输入框宽度 */
-        .remark-form {
-            margin-top: 0.25rem !important;
-            margin-bottom: 0.25rem !important;
-        }
-        .remark-input.id-input {
-            width: 70px;
-            flex-grow: 0;
-            text-align: center;
-        }
+        .action-btn:disabled { background-color: #95a5a6; cursor: not-allowed; opacity: 0.7; }
+        .flash-dynamic-container { position: fixed; top: 20px; right: 20px; z-index: 1050; width: 320px; }
+        .flash-dynamic { padding: 1rem; margin-bottom: 1rem; border: 1px solid transparent; border-radius: 0.25rem; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.15); opacity: 1; transition: opacity 0.5s ease-out; }
+        .flash-dynamic.success { color: #0f5132; background-color: #d1e7dd; border-color: #badbcc; }
+        .flash-dynamic.error { color: #842029; background-color: #f8d7da; border-color: #f5c2c7; }
+        .remark-form { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; }
+        .remark-input.id-input { width: 70px; flex-grow: 0; text-align: center; }
     </style>
 </head>
 <body>
