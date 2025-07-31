@@ -1,4 +1,4 @@
-# 文件名: server.py (v_secure_plus_final_ajax - 最终完整版)
+# 文件名: server.py (最终、完整、包含所有功能的版本)
 import os
 import json
 import requests
@@ -15,7 +15,6 @@ import database
 
 # --- 初始化 ---
 app = Flask(__name__)
-# 从配置文件加载密钥，增强安全性
 cfg = config.load_config()
 app.secret_key = cfg.get('FLASK_SECRET_KEY', os.urandom(24))
 database.init_db()
@@ -76,7 +75,7 @@ def process_clients_data(clients_raw):
         clients_processed.append(client_dict)
     return clients_processed, sorted(list(regions_set))
 
-# --- API 路由 (增加HMAC签名验证和完整的错误处理) ---
+# --- API 路由 (完整的HMAC验证) ---
 @app.route('/report', methods=['POST'])
 def handle_client_report():
     client_ip = request.remote_addr
@@ -132,15 +131,19 @@ def handle_client_report():
 # --- Web 界面路由 ---
 @app.route('/')
 def guest_dashboard():
-    clients_raw = database.get_all_clients(); clients_processed, regions = process_clients_data(clients_raw)
+    # 在访客页面，我们仍然可以按编号排序，但显示的是连续的“机器-XX”
+    clients_raw = database.get_all_clients(sort_by='id')
+    clients_processed, regions = process_clients_data(clients_raw)
     machine_counter = 1
-    for client in clients_processed: client['machine_id'] = f"机器-{machine_counter:02d}"; machine_counter += 1
+    for client in clients_processed:
+        client['machine_id_display'] = f"机器-{machine_counter:02d}"
+        machine_counter += 1
     return render_template('guest_dashboard.html', clients=clients_processed, regions=regions)
 
 @app.route('/cadmin')
 @requires_auth
 def admin_dashboard():
-    sort_by = request.args.get('sort_by', 'time')
+    sort_by = request.args.get('sort_by', 'id') # 默认按编号排序
     clients_raw = database.get_all_clients(sort_by=sort_by)
     clients_processed, regions = process_clients_data(clients_raw)
     return render_template('cadmin_dashboard.html', clients=clients_processed, regions=regions, current_sort=sort_by)
@@ -148,64 +151,59 @@ def admin_dashboard():
 @app.route('/trigger_retest/<ip>', methods=['POST'])
 @requires_auth
 def trigger_retest(ip):
-    # 检查这是否是一个AJAX请求
+    # 完整的AJAX请求处理
     is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-
     client = database.get_client_by_ip(ip)
     if not client:
         message = f"错误：未找到IP为 {ip} 的客户端。"
-        if is_ajax:
-            # 如果是AJAX，返回JSON错误和404状态码
-            return jsonify({"status": "error", "message": message}), 404
-        else:
-            # 否则，使用传统flash消息和重定向
-            flash(message, "error")
-            return redirect(url_for('admin_dashboard'))
+        if is_ajax: return jsonify({"status": "error", "message": message}), 404
+        else: flash(message, "error"); return redirect(url_for('admin_dashboard'))
 
     client_url = f"http://{client['ip']}:{client['port']}/retest"
     headers = {'X-Server-Key': cfg['SERVER_SECRET_KEY']}
-    
-    status_code = 200
-    response_data = {}
-
+    status_code, response_data = 200, {}
     try:
         response = requests.post(client_url, headers=headers, timeout=160)
-        
-        # 尝试解析客户端返回的JSON
-        try:
-            client_response_json = response.json()
-        except json.JSONDecodeError:
-            client_response_json = {}
-
+        try: client_response_json = response.json()
+        except json.JSONDecodeError: client_response_json = {}
         if response.status_code == 200:
-            response_data = {
-                "status": "success", 
-                "message": client_response_json.get('message', f"客户端 {ip} 的任务已成功完成。")
-            }
+            response_data = {"status": "success", "message": client_response_json.get('message', f"客户端 {ip} 的任务已成功完成。")}
         else:
             status_code = response.status_code if response.status_code >= 400 else 500
-            response_data = {
-                "status": "error", 
-                "message": f"客户端 {ip} 报告错误: {client_response_json.get('message', response.text)}"
-            }
-
+            response_data = {"status": "error", "message": f"客户端 {ip} 报告错误: {client_response_json.get('message', response.text)}"}
     except requests.exceptions.RequestException as e:
         status_code = 500
         response_data = {"status": "error", "message": f"连接客户端 {ip} 失败: {e}"}
-
-    # 根据请求类型返回不同的响应
-    if is_ajax:
-        return jsonify(response_data), status_code
-    else:
-        flash(response_data['message'], response_data['status'])
-        return redirect(url_for('admin_dashboard'))
+    if is_ajax: return jsonify(response_data), status_code
+    else: flash(response_data['message'], response_data['status']); return redirect(url_for('admin_dashboard'))
 
 @app.route('/update_remark', methods=['POST'])
 @requires_auth
 def update_remark():
     ip = request.form.get('ip'); remark = request.form.get('remark')
     if ip: database.update_remark(ip, remark); flash(f"已更新 {ip} 的备注。", "success")
-    return redirect(url_for('admin_dashboard'))
+    return redirect(request.referrer or url_for('admin_dashboard'))
+
+@app.route('/update_machine_id', methods=['POST'])
+@requires_auth
+def update_machine_id():
+    """处理更新机器编号的请求"""
+    ip = request.form.get('ip')
+    machine_id_str = request.form.get('machine_id')
+    
+    if not machine_id_str:
+        database.update_machine_id(ip, None)
+        flash(f"已清除 {ip} 的机器编号。", "success")
+        return redirect(request.referrer or url_for('admin_dashboard'))
+
+    if not machine_id_str.isdigit():
+        flash('错误：机器编号必须是一个正整数。', 'error')
+        return redirect(request.referrer or url_for('admin_dashboard'))
+    
+    machine_id = int(machine_id_str)
+    database.update_machine_id(ip, machine_id)
+    flash(f"已更新 {ip} 的机器编号为 {machine_id}。", "success")
+    return redirect(request.referrer or url_for('admin_dashboard'))
 
 @app.route('/delete_client/<ip>', methods=['POST'])
 @requires_auth
