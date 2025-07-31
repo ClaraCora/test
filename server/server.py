@@ -1,4 +1,5 @@
-# 文件名: server.py (v_secure_plus_fixed - 终极安全和功能修复版)
+# 文件名: server.py (v_secure_plus_final - 修复import os错误)
+import os  # <--- 核心修复点：添加这一行
 import json
 import requests
 import hmac
@@ -81,7 +82,6 @@ def handle_client_report():
     client_ip = request.remote_addr
     print(f"\n--- Received report from IP: {client_ip} ---")
 
-    # --- 核心修复：将所有逻辑包裹在同一个try...except块中 ---
     try:
         client_key = request.headers.get('X-Client-Key')
         signature_header = request.headers.get('X-Signature')
@@ -90,39 +90,32 @@ def handle_client_report():
             print(f"[{client_ip}] REJECTED: Missing security headers.")
             return jsonify({"status": "error", "message": "Missing security headers"}), 403
 
-        # 1. 解析签名头
         sig_parts = {p.split('=')[0]: p.split('=')[1] for p in signature_header.split(',')}
         timestamp = int(sig_parts['t'])
         client_signature = sig_parts['s']
 
-        # 2. 检查时间戳是否有效
-        if abs(time.time() - timestamp) > 300: # 5分钟窗口
+        if abs(time.time() - timestamp) > 300:
             print(f"[{client_ip}] REJECTED: Stale request (timestamp expired).")
             return jsonify({"status": "error", "message": "Stale request"}), 408
 
-        # 3. 获取原始请求体用于验证
         body = request.get_data()
         if not body:
             print(f"[{client_ip}] REJECTED: Empty request body.")
             return jsonify({"status": "error", "message": "Empty request body"}), 400
 
-        # 4. 在服务器端重新计算签名
         message = f"{timestamp}.{body.decode('utf-8')}".encode('utf-8')
         secret = client_key.encode('utf-8')
         server_signature = hmac.new(secret, message, hashlib.sha256).hexdigest()
 
-        # 5. 安全地比较签名
         if not hmac.compare_digest(server_signature, client_signature):
             print(f"[{client_ip}] REJECTED: Invalid signature.")
             return jsonify({"status": "error", "message": "Invalid signature"}), 403
 
         print(f"[{client_ip}] Signature verified successfully.")
 
-        # 6. 解析JSON (现在它在try块内部，是安全的)
         report_data = json.loads(body)
         client_port = report_data.get('client_listen_port', 37028)
 
-        # 7. 保存到数据库
         database.save_report(client_ip, client_port, client_key, report_data)
 
         print(f"[{client_ip}] Report saved successfully.")
