@@ -1,5 +1,5 @@
-# 文件名: server.py (v_secure_plus_final - 修复import os错误)
-import os  # <--- 核心修复点：添加这一行
+# 文件名: server.py (v_secure_plus_final_ajax - 最终完整版)
+import os
 import json
 import requests
 import hmac
@@ -148,18 +148,57 @@ def admin_dashboard():
 @app.route('/trigger_retest/<ip>', methods=['POST'])
 @requires_auth
 def trigger_retest(ip):
+    # 检查这是否是一个AJAX请求
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
     client = database.get_client_by_ip(ip)
-    if not client: flash(f"错误：未找到IP为 {ip} 的客户端。", "error"); return redirect(url_for('admin_dashboard'))
-    client_url = f"http://{client['ip']}:{client['port']}/retest"; headers = {'X-Server-Key': cfg['SERVER_SECRET_KEY']}
-    try:
-        response = requests.post(client_url, headers=headers, timeout=150)
-        if response.status_code == 200:
-            flash(f"客户端 {ip} 确认：检测任务已成功完成。", "success")
+    if not client:
+        message = f"错误：未找到IP为 {ip} 的客户端。"
+        if is_ajax:
+            # 如果是AJAX，返回JSON错误和404状态码
+            return jsonify({"status": "error", "message": message}), 404
         else:
-            error_msg = response.json().get('message', '未知错误')
-            flash(f"客户端 {ip} 报告错误: {error_msg}", "error")
-    except requests.exceptions.RequestException as e: flash(f"连接客户端 {ip} 失败: {e}", "error")
-    return redirect(url_for('admin_dashboard'))
+            # 否则，使用传统flash消息和重定向
+            flash(message, "error")
+            return redirect(url_for('admin_dashboard'))
+
+    client_url = f"http://{client['ip']}:{client['port']}/retest"
+    headers = {'X-Server-Key': cfg['SERVER_SECRET_KEY']}
+    
+    status_code = 200
+    response_data = {}
+
+    try:
+        response = requests.post(client_url, headers=headers, timeout=160)
+        
+        # 尝试解析客户端返回的JSON
+        try:
+            client_response_json = response.json()
+        except json.JSONDecodeError:
+            client_response_json = {}
+
+        if response.status_code == 200:
+            response_data = {
+                "status": "success", 
+                "message": client_response_json.get('message', f"客户端 {ip} 的任务已成功完成。")
+            }
+        else:
+            status_code = response.status_code if response.status_code >= 400 else 500
+            response_data = {
+                "status": "error", 
+                "message": f"客户端 {ip} 报告错误: {client_response_json.get('message', response.text)}"
+            }
+
+    except requests.exceptions.RequestException as e:
+        status_code = 500
+        response_data = {"status": "error", "message": f"连接客户端 {ip} 失败: {e}"}
+
+    # 根据请求类型返回不同的响应
+    if is_ajax:
+        return jsonify(response_data), status_code
+    else:
+        flash(response_data['message'], response_data['status'])
+        return redirect(url_for('admin_dashboard'))
 
 @app.route('/update_remark', methods=['POST'])
 @requires_auth
