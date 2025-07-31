@@ -9,19 +9,19 @@ set -e
 # Server 配置
 SERVER_INSTALL_DIR="/opt/main-server"
 SERVER_CONFIG_FILE="$SERVER_INSTALL_DIR/server-config.json"
-SERVER_PY_URL="http://your-server.com/path/to/server.py"       # <-- 修改: server.py 脚本的URL
-SERVER_DB_PY_URL="http://your-server.com/path/to/database.py"   # <-- 修改: database.py 脚本的URL
-SERVER_CFG_PY_URL="http://your-server.com/path/to/config.py"    # <-- 修改: config.py 脚本的URL
-SERVER_HTML_ADMIN_URL="http://your-server.com/path/to/cadmin_dashboard.html" # <-- 修改: 管理员模板URL
-SERVER_HTML_GUEST_URL="http://your-server.com/path/to/guest_dashboard.html" # <-- 修改: 访客模板URL
-SERVER_CSS_URL="http://your-server.com/path/to/style.css"       # <-- 修改: CSS文件URL
+SERVER_PY_URL="https://raw.githubusercontent.com/ClaraCora/test/refs/heads/main/server/server.py"       # <-- 修改: server.py 脚本的URL
+SERVER_DB_PY_URL="https://raw.githubusercontent.com/ClaraCora/test/refs/heads/main/server/database.py"   # <-- 修改: database.py 脚本的URL
+SERVER_CFG_PY_URL="https://raw.githubusercontent.com/ClaraCora/test/refs/heads/main/server/config.py"    # <-- 修改: config.py 脚本的URL
+SERVER_HTML_ADMIN_URL="https://raw.githubusercontent.com/ClaraCora/test/refs/heads/main/server/templates/cadmin_dashboard.html" # <-- 修改: 管理员模板URL
+SERVER_HTML_GUEST_URL="https://raw.githubusercontent.com/ClaraCora/test/refs/heads/main/server/templates/guest_dashboard.html" # <-- 修改: 访客模板URL
+SERVER_CSS_URL="https://raw.githubusercontent.com/ClaraCora/test/refs/heads/main/server/static/style.css"       # <-- 修改: CSS文件URL
 SERVER_SERVICE_NAME="main-server.service"
 SERVER_SERVICE_FILE="/etc/systemd/system/$SERVER_SERVICE_NAME"
 
 # Client 配置
 CLIENT_INSTALL_DIR="/opt/ip-reporter"
 CLIENT_CONFIG_FILE="$CLIENT_INSTALL_DIR/config.json"
-CLIENT_PY_URL="http://your-server.com/path/to/client.py"       # <-- 修改: client.py 脚本的URL
+CLIENT_PY_URL="https://raw.githubusercontent.com/ClaraCora/test/refs/heads/main/client.py"       # <-- 修改: client.py 脚本的URL
 CLIENT_SERVICE_NAME="ip-reporter.service"
 CLIENT_SERVICE_FILE="/etc/systemd/system/$CLIENT_SERVICE_NAME"
 
