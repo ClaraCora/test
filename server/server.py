@@ -1,4 +1,4 @@
-# 文件名: server.py (v_secure_plus - 终极安全和功能版)
+# 文件名: server.py (v_secure_plus_fixed - 终极安全和功能修复版)
 import json
 import requests
 import hmac
@@ -14,8 +14,9 @@ import database
 
 # --- 初始化 ---
 app = Flask(__name__)
-app.secret_key = 'a_random_secret_key_for_flask_session' 
+# 从配置文件加载密钥，增强安全性
 cfg = config.load_config()
+app.secret_key = cfg.get('FLASK_SECRET_KEY', os.urandom(24))
 database.init_db()
 
 # --- 安全功能：HTTP基础认证 ---
@@ -74,44 +75,66 @@ def process_clients_data(clients_raw):
         clients_processed.append(client_dict)
     return clients_processed, sorted(list(regions_set))
 
-# --- API 路由 (增加HMAC签名验证) ---
+# --- API 路由 (增加HMAC签名验证和完整的错误处理) ---
 @app.route('/report', methods=['POST'])
 def handle_client_report():
     client_ip = request.remote_addr
     print(f"\n--- Received report from IP: {client_ip} ---")
-    
-    client_key = request.headers.get('X-Client-Key')
-    signature_header = request.headers.get('X-Signature')
-    
-    if not client_key or not signature_header:
-        return jsonify({"status": "error", "message": "Missing security headers"}), 403
 
+    # --- 核心修复：将所有逻辑包裹在同一个try...except块中 ---
     try:
+        client_key = request.headers.get('X-Client-Key')
+        signature_header = request.headers.get('X-Signature')
+
+        if not client_key or not signature_header:
+            print(f"[{client_ip}] REJECTED: Missing security headers.")
+            return jsonify({"status": "error", "message": "Missing security headers"}), 403
+
+        # 1. 解析签名头
         sig_parts = {p.split('=')[0]: p.split('=')[1] for p in signature_header.split(',')}
         timestamp = int(sig_parts['t'])
         client_signature = sig_parts['s']
 
-        if abs(time.time() - timestamp) > 300:
+        # 2. 检查时间戳是否有效
+        if abs(time.time() - timestamp) > 300: # 5分钟窗口
+            print(f"[{client_ip}] REJECTED: Stale request (timestamp expired).")
             return jsonify({"status": "error", "message": "Stale request"}), 408
 
+        # 3. 获取原始请求体用于验证
         body = request.get_data()
+        if not body:
+            print(f"[{client_ip}] REJECTED: Empty request body.")
+            return jsonify({"status": "error", "message": "Empty request body"}), 400
+
+        # 4. 在服务器端重新计算签名
         message = f"{timestamp}.{body.decode('utf-8')}".encode('utf-8')
         secret = client_key.encode('utf-8')
         server_signature = hmac.new(secret, message, hashlib.sha256).hexdigest()
 
+        # 5. 安全地比较签名
         if not hmac.compare_digest(server_signature, client_signature):
+            print(f"[{client_ip}] REJECTED: Invalid signature.")
             return jsonify({"status": "error", "message": "Invalid signature"}), 403
-            
+
+        print(f"[{client_ip}] Signature verified successfully.")
+
+        # 6. 解析JSON (现在它在try块内部，是安全的)
+        report_data = json.loads(body)
+        client_port = report_data.get('client_listen_port', 37028)
+
+        # 7. 保存到数据库
+        database.save_report(client_ip, client_port, client_key, report_data)
+
+        print(f"[{client_ip}] Report saved successfully.")
+        return jsonify({"status": "success"}), 200
+
+    except json.JSONDecodeError:
+        print(f"[{client_ip}] ERROR: Request body is not valid JSON, although signature was correct.")
+        return jsonify({"status": "error", "message": "Invalid JSON format in request body"}), 400
     except Exception as e:
-        return jsonify({"status": "error", "message": "Signature verification failed"}), 403
-    
-    print("Signature verified successfully.")
-    report_data = json.loads(body)
-    client_port = report_data.get('client_listen_port', 37028)
-    database.save_report(client_ip, client_port, client_key, report_data)
-    
-    print(f"Report from {client_ip} saved successfully.")
-    return jsonify({"status": "success"}), 200
+        print(f"[{client_ip}] CRITICAL ERROR in /report endpoint: {e}")
+        return jsonify({"status": "error", "message": f"Internal Server Error: {e}"}), 500
+
 
 # --- Web 界面路由 ---
 @app.route('/')
@@ -140,7 +163,6 @@ def trigger_retest(ip):
         if response.status_code == 200:
             flash(f"客户端 {ip} 确认：检测任务已成功完成。", "success")
         else:
-            # 将客户端返回的错误信息显示出来
             error_msg = response.json().get('message', '未知错误')
             flash(f"客户端 {ip} 报告错误: {error_msg}", "error")
     except requests.exceptions.RequestException as e: flash(f"连接客户端 {ip} 失败: {e}", "error")
