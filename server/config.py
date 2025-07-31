@@ -12,8 +12,9 @@ def load_config():
         default_config = {
             "SERVER_PORT": 28037,
             "SERVER_SECRET_KEY": new_key,
-            "ADMIN_USER": "cc",
-            "ADMIN_PASS": "cc" # 强烈建议首次启动后修改此密码
+            "ADMIN_USER": "admin",
+            "ADMIN_PASS": "password", # 强烈建议首次启动后修改此密码
+            "FLASK_SECRET_KEY": str(uuid.uuid4()) # 用于session加密
         }
         with open(CONFIG_FILE, 'w') as f:
             json.dump(default_config, f, indent=4)
@@ -24,11 +25,18 @@ def load_config():
         with open(CONFIG_FILE, 'r') as f:
             print(f"从 {CONFIG_FILE} 加载配置。")
             config_data = json.load(f)
-            # 兼容旧配置文件，如果缺少管理员账户则添加
+            # 兼容旧配置文件，如果缺少管理员账户或Flask密钥则添加
+            updated = False
             if 'ADMIN_USER' not in config_data:
                 config_data['ADMIN_USER'] = 'admin'
                 config_data['ADMIN_PASS'] = 'password'
+                updated = True
+            if 'FLASK_SECRET_KEY' not in config_data:
+                config_data['FLASK_SECRET_KEY'] = str(uuid.uuid4())
+                updated = True
+            
+            if updated:
                 with open(CONFIG_FILE, 'w') as f:
                     json.dump(config_data, f, indent=4)
-                print("已为旧配置文件添加默认管理员账户。")
+                print("已为旧配置文件添加缺失的配置项。")
             return config_data
