@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>服务状态监控</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>服务状态监控</h1>
+
+        <div class="filter-container">
+            <button class="filter-btn active" onclick="filterByRegion('all', this)">全部地区</button>
+            {% for region in regions %}
+                <button class="filter-btn" onclick="filterByRegion('{{ region }}', this)">{{ region }}</button>
+            {% endfor %}
+        </div>
+
+        <table id="clients-table">
+            <thead>
+                <tr>
+                    <th>机器编号 / 备注</th>
+                    <th>地区 / 注册地</th>
+                    <th>ASN / 组织</th>
+                    <th>风险评分</th>
+                    <th>流媒体解锁状态</th>
+                    <th>最后更新时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for client in clients %}
+                <tr>
+                    <td>
+                        <strong>{{ client.machine_id }}</strong><br>
+                        <small>{{ client.remark or '通用节点' }}</small>
+                    </td>
+                    <td class="client-region">
+                        <strong>{{ client.display_region }}</strong>
+                        {% set report = client.report_data %}{% if report and report.Info and report.Info[0] %}{% set info = report.Info[0] %}
+                        <span class="sub-info">注册: [{{ info.RegisteredRegion.Code or '?' }}] {{ info.RegisteredRegion.Name or 'N/A' }}</span>
+                        <span class="sub-info">洲: {{ info.Continent.Name or 'N/A' }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <!-- 核心修改点：从新的JSON结构读取数据 -->
+                        {% if report and report.Info and report.Info[0] %}
+                            <strong>AS{{ report.Info[0].ASN or 'N/A' }}</strong>
+                            <span class="sub-info ellipsis" title="{{ report.Info[0].Organization or 'N/A' }}">{{ report.Info[0].Organization or 'N/A' }}</span>
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if report and report.Score and report.Score[0] %}{% set scores = report.Score[0] %}<div class="risk-grid">
+                            <div class="risk-item">Scamalytics: <strong>{{ scores.SCAMALYTICS if scores.SCAMALYTICS is not none else 'N/A' }}</strong></div>
+                            <div class="risk-item">ipapi: <strong>{{ scores.ipapi if scores.ipapi is not none else 'N/A' }}</strong></div>
+                            <div class="risk-item">AbuseIPDB: <strong>{{ scores.AbuseIPDB if scores.AbuseIPDB is not none else 'N/A' }}</strong></div>
+                            <div class="risk-item">IPQS: <strong>{{ scores.IPQS if scores.IPQS is not none else 'N/A' }}</strong></div>
+                            <div class="risk-item">Cloudflare: <strong>{{ scores.Cloudflare if scores.Cloudflare is not none else 'N/A' }}</strong></div>
+                        </div>{% else %}N/A{% endif %}
+                    </td>
+                    <td>
+                        {% if report and report.Media and report.Media[0] %}{% set media = report.Media[0] %}{% set services = {'TikTok': 'TikTok', 'DisneyPlus': 'Disney+', 'Netflix': 'Netflix', 'Youtube': 'Youtube', 'AmazonPrimeVideo': 'PrimeVideo', 'Spotify': 'Spotify', 'ChatGPT': 'ChatGPT'} %}<div class="media-grid">{% for service_key, display_name in services.items() %}{% if media[service_key] %}{% set service = media[service_key] %}<div class="media-item {% if service.Status == '解锁' %}status-yes{% elif service.Status in ['仅自制', 'DNS'] %}status-org{% else %}status-no{% endif %}"><span>{{ display_name }}: <strong>{{ service.Region or 'N/A' }}</strong></span><span class="details"> ({{ service.Status or '?' }}{% if service.Type and service.Type != '' %}/{{ service.Type }}{% endif %})</span></div>{% endif %}{% endfor %}</div>{% else %}无数据{% endif %}
+                    </td>
+                    <td>
+                        <span class="last-report-time">{{ client.last_report_time }}</span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <script>
+        function filterByRegion(region, buttonElement) { const rows = document.querySelectorAll('#clients-table tbody tr'); rows.forEach(row => { const mainRegion = row.querySelector('.client-region strong').textContent.trim(); if (region === 'all' || mainRegion === region) { row.style.display = ''; } else { row.style.display = 'none'; } }); document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); buttonElement.classList.add('active'); }
+    </script>
+</body>
+</html>
